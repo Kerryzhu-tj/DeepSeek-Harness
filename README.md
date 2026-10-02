@@ -1,266 +1,389 @@
-# **新发布的DeepSeek Harness的五大创新及其启示**
+# DeepSeek Harness 0.2.0-rc.2：新特性全景与 Harness 演化趋势
 
-> **"能跑"不等于"敢交付"。当 Agent 系统从演示走向生产，从单个模型走向多智能体团队，从黑盒执行走向可审计可控，我们需要的不是更强的模型，而是一个真正的 Agent 操作系统。**
-
-2026 年 8 月，DeepSeek 正式开源了 **DeepSeek Harness（dsh）**，一个 MIT 许可的 Agent 驾驭框架。这不是又一个"大模型 + 工具列表"，而是一套系统化的工程基础设施，旨在让 Agent 从"能跑"进化为"可控、可验收、可持续"——这正是我们所说的从**"能跑"到"敢交付"**的转变。
-
----
-
-## 一、为什么 DeepSeek 要"急着"发布和开源？
-
-### 1. 行业的痛点已经暴露
-
-2026 年上半年，行业数据已经刺痛了很多企业：
-- **40% 的 agentic AI 项目**在 2027 年底前面临被取消或下线的风险，**主因不是模型能力不足，而是治理缺口**[ref:3]
-- **多数项目不是死在 PoC，而是停在规模化之前**——第 6–12 个月是高危期[ref:2,9]
-- **语境漂移（context rot）**已被确认为所有前沿模型上的工程风险[ref:21,28]
-
-这些都指向一个核心问题：**模型解决"能不能做到"，但系统必须解决"敢不敢交付"。**
-
-### 2. 技术对标从"模型能力"转向"执行可靠性"
-
-DeepSeek 的策略转变很聪明：与其和 OpenAI/Anthropic 比模型参数和推理能力（这场比赛很难赢），不如把竞争维度移到"执行系统的可控性、可观测性、可治理性"这些企业更在乎的指标上。
-
-- Claude Code 和 Codex 的会话是**黑盒私有的**，无法外部审计
-- DeepSeek Harness 把会话变成**类型化事件日志**，支持 keyless 重放、快照回归、全文检索[ref:92]
-
-这一步转变，**从"谁的模型更聪明"变成"谁的系统更可信"**。
-
-### 3. 开源 = 快速验证 + 生态共建 + 技术标准化
-
-DeepSeek 选择 MIT 许可并快速开源（v0.1 时就发布），目的很明确：
-- **闭环加速**：在社区中暴露缺口，迭代速度远快于单独商业化
-- **降低采用门槛**：企业更愿意集成开源基础设施而非被技术锁定
-- **争夺标准**：如同 Linux 之于操作系统，DeepSeek Harness 想成为 Agent 系统的"事实标准"
+> **一句话结论：0.2.0-rc.2 不是一次功能迭代，而是一次"物种扩张"——dsh 从"插件化的 Agent 框架"进化成了一个可安装、可组合、可运营的 Agent 操作系统，并由此暴露出 Harness Engineering 正在形成的九条结构性演化趋势。**
+>
+> 研究对象：DeepSeek Harness（`dsh`）源码发布 `deepseek-harness-master`，根清单 `@deepseek-ai/dsh-root` **0.2.0-rc.2**（快照 2026-09-29）
+> 对比基线：`0.1.0-rc.5`（2026-08-14 索引）与前序研究（2026-08-23 两份专题报告 + 五大创新）
+> 配套文档：`FILE_INDEX.dsh-0.2.0-rc.2.md` / `.html`
+> 日期：2026-10-02
 
 ---
 
-## 二、深入解读五大创新
+## 一、版本定位：从"能跑的框架"到"可交付的产品系统"
 
-### **创新 1：会"改写自己"的运行时**（Self-modifying Runtime）
+上一版（0.1.0-rc.5）已经建立了 dsh 的骨架：事件溯源会话（`Model-visible ⟺ Logged`）、能力接缝、异构子代理、跨平台沙箱、机器强制的可靠性门禁。**0.2.0-rc.2 把这套骨架变成了一个完整的、可以安装到终端用户机器上的产品**。
 
-**痛点**：传统 agent 框架的能力是静态的。模型只能"调用"工具，框架本身无法演进。
-
-**DeepSeek 的答案**：通过 **Typert 类型反射 + Cordis 动态加载**，让 Agent 能：
-- 检视自己的运行时结构（有哪些工具、插件、能力）
-- 动态生成新插件并在 **node:vm 沙箱**中执行
-- 挂载/卸载新能力，而不需要重启系统
-
-**关键组件**：
-- **dsh-tool-cordis**：模型可见的运行时检视工具
-- **cordis-host-runner**：node:vm 隔离 + 请求-运行往返
-- **风险受控**：生命周期守卫 + 权限隔离，"可改写"不等于"失控改写"
-
-**为什么这是创新**：  
-其他 Agent 框架只允许模型"调用"工具。DeepSeek 让 Agent **改变自己的工具集** —— 这是从"静态框架"向"动态自进化系统"的质的飞跃。[ref:105]
-
-实际效果：Agent 可以在运行时识别自己的缺陷（"我缺少某个能力"），然后自己生成、验证、加载新能力，而不必等待人工干预。
-
----
-
-### **创新 2：事件溯源 + 可重放会话**（Event Sourcing & Replayable Sessions）
-
-**痛点**：Agent 最恐怖的生产灾难不是单次失败，而是**失败后无法复盘**。
-- Claude Code 的会话是私有的，你看不到 Agent 到底做了什么
-- 无法重放意味着无法审计、无法定位根因、无法验证修复
-
-**DeepSeek 的答案**：把 **Session 设计为一等公民**：
-- 会话 = **类型化、版本化的事件日志**（SessionEventMap）
-- 系统状态来自日志的折叠和投影（类似数据库的事务日志）
-- 支持 **JSONL/zstd + SQLite 双持久后端**，效率与可靠性兼顾[ref:105]
-
-**关键能力**：
-- **Keyless 重放**：无需原始 API Key，从日志重放任何历史会话
-- **快照回归测试**：可以对不同版本的 Agent 逻辑做对比测试
-- **全文检索 + 血缘追踪**：SQLite FTS5 + 关系查询，快速定位某个错误决策是在第几步做的
-
-**为什么这是创新**：  
-传统日志是"发生了什么"的记录。DeepSeek 让日志变成**"系统完整的决定论重建"**——给定同一份日志，任何人、任何时间都能得到相同的行为轨迹。[ref:105]
-
-**工程价值**：
-- 可审计：所有 Agent 行为都有完整的审计链
-- 可复现：Bug 复现不再靠"描述"，而是靠"重放"
-- 可学习：失败案例成为训练数据，可驱动自进化
-
----
-
-### **创新 3：异构子代理协议**（Heterogeneous Sub-Agent Protocol）
-
-**痛点**：企业环境中通常有多个 Agent 产品和工具链。如何让它们互相调用、协作？
-
-**DeepSeek 的答案**：定义两层协议：
-- **ACP**（Agent Client Protocol）：自动化专用，面向任务编排
-- **dsh-sdk**：JSON-RPC 进程外驱动，更通用
-
-**关键意义**：
-- 你可以把 Claude Code、Codex **当作"子代理"**委派任务
-- 不同 Agent 实现可以互相调用，形成**异构智能体网络**
-- 协议化接口意味着你不被单一厂商锁定
-
-**实现形式**：
-- 五种子代理后端：in-process spawn、in-process fork、ACP、Claude Code、Codex[ref:106]
-- 三类工具支持：委派、控制、报告
-- 父子协作形成闭环
-
-**为什么这是创新**：  
-大多数 Agent 系统是单体架构（"我就是唯一的 Agent"）。DeepSeek 承认现实：企业有多个 Agent 和工具链，系统应该支持它们**协议化、可替换的互操作**。这就像 OS 的"进程通信"——不同厂商的应用也能通过标准协议通信。[ref:106]
-
----
-
-### **创新 4：可移植沙箱 + "fail-closed" 设计**（Portable Sandbox & Fail-closed）
-
-**痛点**：Agent 执行高风险操作（改文件、运行命令、访问网络）时，如何保证不越权？
-
-**DeepSeek 的答案**：一整个**跨平台沙箱族**：
-- **Linux**：Landlock（内核能力隔离）+ bwrap（namespace）
-- **macOS**：Seatbelt（App Sandbox）
-- **Windows**：受限令牌 + ACL[ref:106]
-
-**关键设计**：
-- **原生 C11 实现**：native/landlock-run，自限制后 exec（不依赖外部工具）
-- **Fail-closed exit 125**：当内核无法强制隔离时，**直接失败而非偷偷放开**
-- **双重机制**：沙箱隔离 + 权限策略（sandbox-policy）分级控制
-
-**为什么这是创新**：  
-沙箱很多系统都有，但 DeepSeek 的创新是：
-1. **跨平台一致**：同一份策略，Windows/macOS/Linux 行为一致
-2. **"安全失败"**是第一原则：宁可功能受限，也不偷偷放开权限
-3. **原生底层**：C11 Landlock 实现意味着零依赖、最小化攻击面[ref:106]
-
-这体现了一个工程哲学：**治理不是在应用层的 prompt 里祈祷，而是在基础设施层被机制强制执行**。
-
----
-
-### **创新 5：把"可靠性"当作工程纪律**（Reliability as Engineering Discipline）
-
-**痛点**：很多 Agent 系统把可靠性寄托在 prompt 调优、温度参数、或"模型自我反思"上。这都是概率性的，无法保证。
-
-**DeepSeek 的答案**：建立一套**机器强制的工程门禁**：
-
-1. **机器强制门禁**：
-   - 100% 代码覆盖率（coverage）
-   - 自动化快照回归测试（snapshot tests）
-   - 死代码检测（knip）、复制代码检测（jscpd）
-   - 导出一致性检查（publint）
-   - 运行时不变量校验（invariants）[ref:107]
-
-2. **决策与知识沉淀**：
-   - **Agent Notes**：~680 条决策记录（为什么这样设计、为什么放弃另一个方案）
-   - **Postmortem**：事故复盘（发生了什么、为什么发生、怎么防止再发生）
-   - 这些知识可以被持续迭代利用
-
-3. **自动生成文档**：
-   - **config-catalog**：自动生成所有配置选项的文档
-   - **tool-catalog**：所有模型工具的 schema 自动列举
-   - **persistence-catalog**：所有持久化事件类型的目录
-   - **双语文档体系**：.md + .zh.md + .i18n.yaml 三元组，词条一致性强制[ref:107]
-
-**为什么这是创新**：  
-可靠性 = 工程化，而不是靠 prompt 调优。这是 DeepSeek Harness 与一线 Agent 产品（Claude Code/Codex）的**本质区别**。
-
-前者把可靠性看作**可优化的指标**（覆盖率、测试通过率、不变量成立率）；后者依赖**不可量化的因素**（模型"有没有想对"、prompt 有没有足够清晰）。[ref:107]
-
----
-
-## 三、四道门的工程闭环
-
-DeepSeek Harness 用**四道门**把 Agent 系统从"能跑"推向"敢交付"：
-
-```
-编排（做完）→ 验证（做对）→ 上下文/记忆（不漂移）→ 治理（敢交付）
-```
-
-### **门一：编排（做完）**
-- 能力接缝：能力定义/提供/消费分离，bash/pwsh、本地/沙箱/E2B 可随意切换
-- 子代理与工作流：多 Agent 协作、工作流隔离执行、目标多轮续做
-- **关键指标**：任务是否被完整执行？是否支持长时间运行、断点续跑、失败重试？
-
-### **门二：验证（做对）**
-- 事件溯源 = 天生可重放
-- 运行时不变量：机器强制约束（100% 覆盖、快照、postmortem）
-- OpenTelemetry 遥测：live/replay/local 三种观测模式
-- **关键指标**：结果是否可验证？执行过程是否可审计？
-
-### **门三：上下文/记忆（不漂移）**
-- 单一权威日志：session 是唯一的事实源
-- 有界压缩：token 压力下的智能摘要 + tool-result 裁剪
-- 可检索：SQLite FTS5 + 血缘追踪
-- **关键指标**：上下文是否稳定？模型看到的数据是否与存储的一致？**"Model-visible ⟺ Logged"**
-
-### **门四：治理（敢交付）**
-- 跨平台沙箱 + fail-closed
-- 权限预设 + 版本守卫写
-- 审批流 + 人工升级（ESCALATE）
-- 凭证治理 + 护栏与不变量
-- **关键指标**：是否能精细控制权限？是否所有高危操作都可审批？是否敢在生产环境运行？
-
----
-
-## 四、与 Claude Code / Codex 的对比
-
-| 维度 | DeepSeek Harness | Claude Code | Codex |
+| 维度 | 0.1.0-rc.5（基线） | 0.2.0-rc.2（本次） | 变化性质 |
 |---|---|---|---|
-| **架构** | Agent 操作系统（plugin-first） | CLI Agent | CLI Agent |
-| **交付形态** | CLI / Web / ACP / JSON-RPC SDK / Python SDK | Web IDE | Web IDE |
-| **会话可观测** | 事件日志 + 可重放 + FTS5 检索 | 黑盒（私有） | 黑盒（私有） |
-| **子代理能力** | 五种后端（in-process / ACP / Claude Code / Codex / dsh-sdk） | 不支持 | 不支持 |
-| **跨平台沙箱** | bwrap / Landlock / Seatbelt / Win-ACL | 仅 Linux | 仅 Linux |
-| **开源** | MIT 许可，完全开源 | 闭源商业产品 | 闭源商业产品 |
-| **可靠性工程** | 机器强制门禁 + 680 条决策记录 | 内部流程（不可见） | 内部流程（不可见） |
-| **Python SDK** | 官方支持 + 单文件 exe runtime | 不支持 | 不支持 |
+| 包组 / 包数 | 54 组 / ~219 包 | **55 组 / 316 包** | +44% 模块数 |
+| 会话格式写入器 | v0 | **v4**（已发布格式 v3） | 4 次结构性跃迁 |
+| 应用形态 | CLI + Web | **CLI + Web + Electron Desktop + Desktop Host** | 新增一整条桌面跑道 |
+| 发行机制 | 直接运行插件树 | **profile + bundle + patch 分层** | 组合方式产品化 |
+| 前端包 | 少量 | **client/ 63 个包** | Web 变成真正的工作台 |
+| 长期决策记录 | ~680 条 | **≈ 526 EN（≈1051 含中文）实现态 Note** | 决策资产持续膨胀 |
+| 文档 | 多篇 | **359 篇 md / 64 个子系统页** | 文档即基础设施 |
+| 测试规格 | — | **≈ 1,501 个 `*.spec.ts`** | 质量门禁持续加码 |
 
-**关键差异**：DeepSeek Harness 不是"更强的 Agent"，而是把 Agent 变成**可控、可审计、可扩展的基础设施**。
+**三句话读懂这一版：**
 
----
-
-## 五、Harness Engineering 最新趋势
-
-从 DeepSeek Harness 的设计，我们能看到 **Harness Engineering**（驾驭工程）的三个最新发展趋势：
-
-### **1. 从"框架能力"走向"可治理运行时"**
-- 自改写运行时、沙箱与 fail-closed，让框架具备工程演进能力
-- 治理不是静态的策略配置，而是动态的、可观测的、可降级的决策引擎
-
-### **2. 从"日志"走向"事件-可重放-可审计"**
-- 事件溯源让 Agent 行为变成**可回放的证据链**
-- 这是可规模化交付的前提：你必须能解释"为什么 Agent 做了这个决策"
-
-### **3. 从"调参/自评"走向"工程纪律与自动化守门"**
-- 可靠性不靠运气，而靠**门禁、覆盖、不变量、postmortem、资产新鲜度管理**
-- 这标志着 Agent 工程从"科研探索"向"工程规范"的转变
+1. **横轴变宽**：Agent 的"手"从 shell/文件扩展到浏览器、桌面、Office、SSH、LSP、持久终端、程序化编排——每一个都是可替换的能力接缝。
+2. **纵轴变深**：会话日志从"可重放"深化为"可迁移（v0→v4 相邻迁移链）、可投影缓存、可跨进程加锁、可跨版本读取"。
+3. **外层变厚**：桌面端、profile/bundle、插件市场页、账号与配额、崩溃诊断、有界遥测——从"研发工具"补齐为"可运营产品"。
 
 ---
 
-## 六、给企业的启示
+## 二、新特性全景图谱
 
-如果你的组织正在评估 Agent 系统，DeepSeek Harness 给出的信号是：
+按能力域归纳 0.2.0-rc.2 相对基线的净新增/重大改造。证据为源码路径或 Agent Note 路径。
 
-1. **问"能跑"之前，先问"能控"**  
-   一个 Agent 会不会跑，和一个 Agent 能不能被企业安全地部署，是两回事。前者看模型能力，后者看系统底座。
+### 2.1 桌面应用（Desktop）——本次最大净新增面
 
-2. **可重放性是生产级系统的必须项**  
-   如果你的 Agent 系统无法完整重放某个历史行为，那它就无法被审计、无法被修复、无法被学习。
+| 项目 | 内容 |
+|---|---|
+| 形态 | Electron 外壳，内置一份精确签名的 dsh 生产运行时，独占 `$DSH_HOME/profiles/desktop`，默认端口 **19387** |
+| 关键路径 | `apps/desktop/`（外壳 + NSIS 安装器 + 更新/托盘/欢迎页）、`apps/desktop-host/src/{office,platform-session,quit-inspection,update-tasks}.ts` |
+| 机制 | 立即加载打包 Web 资源 → 私有 Host 以 Electron Node 模式启动 → 通过 Node IPC + `dsh-app://app/` 连接；强制更新、崩溃报告、内置 Python/Node/pnpm"主运行时"（`$DSH_HOME/dsh-runtimes/dsh-primary-runtime`） |
+| 决策 | `architecture/2026-08-25-electron-desktop-packaging-and-updates.md`、`2026-09-11-desktop-electron-node-runtime.md`、`2026-09-14-desktop-primary-runtime.md`、`2026-09-22-fatal-diagnostics-and-crash-reports.md`、`2026-09-23-desktop-close-to-background-and-quit-confirmation.md`、`2026-09-27-desktop-cli-runtime.md` |
 
-3. **权限与治理必须在基础设施层强制**  
-   不要依赖 prompt 来约束 Agent 的行为。使用沙箱、权限策略、审批流等机制在系统层强制执行。
+**为什么重要**：它把 dsh 从"要装 Node/pnpm 才能跑的源码"变成"双击即用的本地应用"。这是 Harness 走向"操作系统类比"的关键一步——操作系统必须先能被安装。
 
-4. **开源基础设施 = 技术自主**  
-   闭源产品再好，你也被锁定在厂商的技术选择上。开源 Agent OS 意味着你可以定制、可以审计、可以主导自己的 AI 战略。
+### 2.2 Agent Teams（实验性）——从"委托"到"有状态团队"
+
+| 项目 | 内容 |
+|---|---|
+| 形态 | `ctx.agentTeams` 协作域：持久花名册 + 任务 DAG + 邮箱，叠加在 continuable subagent 上 |
+| 关键路径 | `packages/experimental/{agent-team,agent-team-profile,tool-agent-team,client-ui-agent-team}`、`docs/subsystems/agent-team.md` |
+| 机制 | `TeamId` = 根 SessionId 的品牌化；`TeamTaskId` 带 compare-and-set `revision`、`blockedBy` DAG、advisory `writeScopes`；`agentTeam` 投影从根日志重放 |
+| 决策 | `architecture/2026-09-18-agent-teams-single-bundle.md`（一个开关取代 Host/Web 双 bundle） |
+
+**为什么重要**：dsh 不再只有"一次性委托"，而是有了**持久化、可恢复、可审计的多智能体协作**。这正是从"Agent"到"Agent 组织"的门槛。
+
+### 2.3 Workflow + PTC——程序化编排
+
+| 项目 | 内容 |
+|---|---|
+| 形态 | 模型编写编排脚本（workflow）扇出 subagent；PTC（programmatic tool calling）在沙箱 Node 子进程中运行 JS 程序调用宿主绑定 |
+| 关键路径 | `packages/workflow/{workflow,workflow-ptc,tool-workflow,tool-ralph}`、`packages/ptc-runtime/{ptc-runtime,ptc-runtime-node}`、`packages/experimental/ptc-runtime-python` |
+| 机制 | `ctx.workflowEngine.start()` → `WorkflowRun`；`run_in_background` 注册为 `kind:'workflow'` job；`PtcRunFailure` 是与异常正交的分类法（超时/中止/worker 退出/沙箱不可用…） |
+| 决策 | `architecture/2026-09-11-sandboxed-node-ptc-runtime.md`、`2026-09-13-workflow-ptc-sandbox-reuse.md`、`feature/2026-09-01-workflow-run-in-background.md` |
+
+**为什么重要**：编排不再是"模型一步步 tool call"，而是**模型写程序、程序编排 Agent**——Agent 系统获得了递归与规模化能力。
+
+### 2.4 后台作业与调度（Jobs / Schedule）
+
+- **Jobs**（`packages/jobs/*`, `ctx.jobs`）：owner-fenced 的后台作业注册表，每个作业一个有界输出环，消费/观察双游标，`list/get/read/kill/wait/remove`，作业完成默认唤醒空闲 owner（`2026-09-22-unbounded-completion-wakes-by-default.md`）。
+- **Schedule**（`packages/schedule/schedule`, `ctx.schedule`）：Host 持有的一次性/周期提醒，`after|at|every|daily|weekly|cron`（Vixie 5 段）、显式 IANA 时区、DST 规则、有界投递历史，投递回原 Session 并可冷恢复。
+
+**为什么重要**：长时程任务不再阻塞一个 turn；"时间"成为 Agent 的第一类输入。
+
+### 2.5 Goal / Plan / Guard——目标、计划与循环卫生
+
+- **Goal**（`ctx.goals`）：同一 Session 的持久完成目标，revisioned 状态 + 自动续做轮次（`goal-round-driver`）。
+- **Plan**（`ctx.planMode`）：可回放的 plan 模式协作状态 + `exit_plan_mode` 工具。
+- **Guard**：`repeat-tool-reminder`（重复调用提醒）+ `timeout-policy`（工具调用截止时间）。
+
+**为什么重要**：Harness 开始显式建模"用户要什么（Goal）""Agent 怎么规划（Plan）""循环如何不空转（Guard）"——这是**agentic 长任务可靠性**的三个支点。
+
+### 2.6 浏览器与桌面操作（Browser-use / Computer-use）
+
+- `ctx.browserUse` / `ctx.computerUse` 是"注册唯一 provider"的接缝；provider 包括 Playwright MCP、Chrome DevTools MCP、Stagehand 原生、Cua Driver MCP/原生。
+- **Sidebar Browser**（`client/ui-sidebar-browser`）：在右侧栏打开沙箱化的 HTTP(S) 页面（含 loopback）；桌面端用 Electron webview 承载。
+
+**为什么重要**：Agent 的"手"从进程内延伸到浏览器与 GUI，且仍保持 provider 注册 + 每 Session 所有权的显式约束。
+
+### 2.7 Office / 文档
+
+- Host 侧 `ctx.officeToPdf`（`packages/document/office-to-pdf`）：DOC/XLS/PPT → PDF，独立发布的原生引擎或 WASM 回退，有界准入 + 内容哈希缓存 + 缺失字体诊断。
+- 内置 Office 技能（`skill/skill-office`）+ 浏览器内电子表格预览（FortuneSheet + 打过补丁的 ExcelJS/SheetJS）。
+
+**为什么重要**：真实文档工作流（写作→预览→交付）成为一等能力，而不是"让模型想办法装库"。
+
+### 2.8 Profile / Bundle / Preset / 插件生态——发行工程
+
+| 能力 | 说明 | 路径 |
+|---|---|---|
+| **Profile** | 命名组合（`web`/`headless`/`sdk`/`sdk-minimal`/`acp`），列出 bundle 栈与 patch | `docs/architecture.md#profiles-and-bundles` |
+| **Bundle** | 发行格式：`package.json` 的 `dsh.profile`/`dsh.bundle` 声明，可被上层 patch | `packages/bundle/*` |
+| **Agent Preset** | 用普通 Cordis YAML 声明子插件，注册表保留运行中的历史 revision | `packages/preset/*`、`2026-09-18-declarative-agent-presets.md` |
+| **插件管理页** | 引导式安装、持久化 creator 管理、配置编辑、插件清单 | `boot/plugin-manager`、`host/plugin-inventory`、`client/ui-plugin-manager`、`ui-settings-plugins` |
+| **实验能力可选包** | Agent Teams、语音输入、Auto review、Schedule 作为可选 bundle（默认关） | `2026-09-21-experimental-capabilities-as-optional-bundles.md` |
+
+**为什么重要**：dsh 把"如何组合"从代码变成了配置与发行物——这是平台化的必经之路，也是"一切皆插件"从口号落地的证据。
+
+### 2.9 MCP / Hooks / Skills——互操作与能力复用
+
+- **MCP**：从"只有工具"扩展到 **resources + 作用域化 server instructions + SDK 协议协商**（`packages/mcp/mcp-resources`）。
+- **Hooks**：复用 Claude Code / Codex 的 shell hook 配置（`packages/hooks/*`），通过 `hook/invoked`、`hook/result` 落日志。
+- **Skills**：注册表 + 目录/加载工具，新增 Office 技能与工作区依赖技能，创作者技能"渐进式披露"。
+
+**为什么重要**：dsh 选择**吸收而非对抗**既有 Agent 生态（Claude Code、Codex、MCP），同时保持这些能力可审计。
+
+### 2.10 上下文 / 压缩 / 会话格式 v3→v4 / 检索
+
+- **格式 v3**：规范化事件信封，message/tool-result 必须带 `surfaceOp`；log-only 事件仅 `type/seq/time/data/ignorable`（`2026-09-06-v3-canonical-session-envelopes.md`）。
+- **格式 v4**：一等 `role:'tool'` 消息、developer 角色 tool add/remove + `deferLoading`、producer-owned 消息源、`turn/end.reason: forked`（`2026-09-15-first-class-tool-role-messages.md`）。
+- **相邻迁移链**：`session-format-v0-to-v1` … `v3-to-v4`，只加版本化后继，**绝不移动/覆盖/删除已提交的文件**（`2026-08-31-released-session-format-migrations.md`）。
+- **投影缓存**：`session-projection-cache` 持久化 `(sessionId,key,ver,seq,val)`，节流写回 + 关键点强制 checkpoint + 跨版本读兼容。
+- **压缩演进**：image offload、tool-result pruner、checkpoint policy。
+
+### 2.11 工具管线：动态化、三阶段、系统提示入 surface
+
+- **动态工具更新**：`request/header.tools` + `developer/message` 的 `tool-registry` 变更 + `Session.toolHistory()` + `projectToolUpdates`；DeepSeek 侧发送 tool-changes beta 头。
+- **三阶段工具调用**（客户端）：`preparing`（参数生成中的实时增量）→ `start`（`tool/call`）→ `result`（`tool/result`），准备阶段只作展示、绝不持久化/进入模型。
+- **系统提示成为 surface 节点**：`system/message` 成为普通 surface 事件，提示变更 = 节点替换 + 开启新 `series`，头部受压缩保护。
+
+**为什么重要**：这三者共同指向一个事实——**Harness 正在与模型 API 共同演进**（缓存感知的工具目录、稳定的系统提示节点），而不是把模型当成无状态函数。
+
+### 2.12 治理、安全与运营
+
+- **沙箱**：bwrap/Landlock/Seatbelt/Windows ACL；`sandbox-same-mode`；Windows 强制完整性级（`2026-09-19-windows-acl-mandatory-integrity-confinement.md`）。
+- **原生原语**：`native/system` 新增 POSIX `flock`，支撑**跨进程 Session 写租约**。
+- **Auto Review（实验）**：`auto` 权限预设下，每次原生/PTC 内层调用前做同模型风险评估，可回退到人工审批。
+- **运营可观测**：fatal diagnostics + 崩溃报告、有界 session-log 上传、OTel 字节上限、产品遥测默认受反馈门控。
+- **账号/凭据**：DeepSeek 账号登录、配额充值、登出；凭据引用与授权流作为显式 seam。
+
+### 2.13 Web 客户端革命——从聊天框到工作台
+
+右侧栏停靠引擎（`ui-dockkit` + `ui-sidebar-right`）取代旧 Detail 面板；资源模型；文件树、文档预览、浏览器、终端、Jobs、Schedule、Plan、Goal、Subagent、Trajectory、Deliverables 等页面；会话置顶/归档、归档停止运行中工作、默认工作区；统一模型输入控件、引用预览、语音输入（实验）。
+
+### 2.14 被移除 / 被简化（减法的信号）
+
+| 简化项 | 证据 |
+|---|---|
+| 移除 E2B 沙箱/文件/子进程 provider，改为 POSIX SSH | `simplification/2026-09-11-remove-e2b-providers.md` |
+| 会话持久化改为 **JSONL 唯一**（删除 SQLite 权威存储） | `simplification/2026-08-30-jsonl-only-session-persistence.md` |
+| DeepSeek 官方线路改为 **Messages-only**（去掉 Chat Completions 协议选择器） | `simplification/2026-09-19-deepseek-messages-only.md` |
+| `ralph` 工具默认关闭 | `simplification/2026-09-12-ralph-off-in-shipped-defaults.md` |
+| 移除不必要的 `./invariant` 伴生包 | `simplification/2026-08-28-omit-unneeded-invariant-companions.md` |
+
+**洞察**：这次 release 同时展示了"加法"（新能力域）与"减法"（收敛抽象、删除冗余后端）。**主动做减法，是工程成熟度的反直觉标志。**
 
 ---
 
-## 七、结语
+## 三、十项深入剖析
 
-> **从"能跑"到"敢交付"，不是模型更强就能做到的。需要的是一个真正的操作系统——把编排、验证、记忆、治理统一成闭环，让 Agent 进入生产流程且可控、可追溯、可持续。**
+### 3.1 桌面端：Harness 必须先能被"安装"
 
-DeepSeek Harness v0.1 的发布，标志着 Agent 工程不再是"工程师 + 好的 prompt"，而是一个**系统化的驾驭工程学科**。
+操作系统的第一性属性不是功能多，而是**能被安装、能自我更新、能自我诊断**。dsh 0.2.0 的桌面端把这三件事补齐：内置精确版本的运行时（消除"环境漂移"）、强制/自动更新（版本可控）、崩溃报告与致命诊断（可运营）。这一点常被忽视，却决定了 Agent 能否真正进入普通用户的桌面，而不只是工程师的终端。
 
-五大创新（自改写运行时、事件溯源、异构协议、可移植沙箱、工程纪律）合在一起，形成了一个闭环：
-- 框架足够灵活（能改写自己）
-- 行为足够透明（事件可重放）
-- 协作足够开放（子代理协议）
-- 安全足够可信（沙箱 + 治理）
-- 质量足够有保障（工程纪律）
+### 3.2 能力接缝的"经济学"
 
-这就是下一代 AI 基础设施的样子。
+`docs/capability-seams.md` 显示接缝已经覆盖：`llm`、`fs`、`subprocess`、`sandbox`、`ssh`、`shell`、`terminals`、`lsp`、`ptcRuntime`、`workflowEngine`、`jobs`、`schedule`、`sessionPersistence`、`sessionQuery`、`sessionProjections`、`subagents`、`skills`、`spillStore`、`web`、`mcpResources`、`browserUse`、`computerUse`、`officeToPdf`、`storage`、`credentials`……每一个都被声明为 **Service Definition / Provider / Consumer** 三元组。
 
+**深层规律**：接缝数量随能力域线性增长，但**消费者数量随接缝超线性增长**（一个 provider 替换会带动 Bash、PTY、LSP、沙箱一起移动）。这带来了巨大的可组合性，也带来了成本——**增加一个能力，必须设计完整的三角色，而不是塞一个函数**。这解释了为何包数从 219 涨到 316。
+
+### 3.3 会话日志：从"可重放"到"可迁移 + 可缓存"
+
+0.1 时代的最强不变量是 `Model-visible ⟺ Logged`。0.2 把它推进为四层保证：
+
+1. **可重放**：`deriveEventMessage()` 单一投影规则。
+2. **可迁移**：相邻版本迁移链，已提交的 generation 永不改名/覆盖/删除。
+3. **可缓存**：投影缓存持久化，热路径读缓存、冷路径重放。
+4. **可并发**：原生 `flock` 跨进程写租约，避免多进程写坏同一个 Session。
+
+这是本次 release **最深、最不显眼、也最重要的变化**。它决定了 dsh 能否支撑长期运行、多进程、多版本并存的真实生产环境。
+
+### 3.4 动态工具 + 三阶段工具调用 + 系统提示入 surface
+
+三件事共同回答一个问题：**当模型 API 开始原生支持 prompt caching 与工具目录变更时，Harness 该如何配合？**
+
+- 动态工具更新让工具目录成为日志中的一个"可 fold 的历史"，使缓存失效点可精确界定。
+- 三阶段工具调用让 UI 在模型"还在生成参数"时就能展示活动，而不必等到 `tool/call`。
+- 系统提示成为 surface 节点 0，让提示变更像消息替换一样可重放、可压缩保护。
+
+**这是 Harness 与模型 API"协同设计"的标志**：过去 Harness 是模型外面的壳，现在两者在协议层互相迁就。
+
+### 3.5 Agent Teams：为什么"团队"比"委托"难一个数量级
+
+一次性委托（subagent）只需保证"结果能回来"。团队需要**持久身份、共享任务状态、冲突检测（writeScopes）、消息去重、权限与取消**。dsh 把这些都落在**根 Session 日志**上（`TeamId = 根 SessionId`），因此团队状态**天然可重放、可审计**——这是它相较"另起一个房间记状态"的关键设计选择。
+
+### 3.6 Workflow + PTC：把"编排"从模型推理中解放
+
+逐步 tool call 编排的多轮次成本高、上下文易漂移。让模型**写一段程序**，由沙箱程序去扇出 Agent，本质是用**确定性代码**替代**概率性多轮对话**。这与"把可靠性当工程纪律"一脉相承：能写成代码的，就不要指望模型每次都"想对"。
+
+### 3.7 Jobs + Schedule：长时程执行的两种时间尺度
+
+- Jobs 解决"**同一时间**内的长任务"（未来完成、后台运行、完成唤醒）。
+- Schedule 解决"**跨时间**的触发"（未来某个时刻/周期）。
+
+两者都把"等待"从 Agent 的占用中解耦出来——这是从"请求-响应"到"持续运行系统"的转变。
+
+### 3.8 治理运营化：从"沙箱存在"到"治理可运营"
+
+0.1 已有沙箱与 fail-closed。0.2 把它推进为**可运营的治理体系**：Windows ACL 强制完整性、Auto Review 同模型评审、fatal diagnostics/crash reports、有界遥测与上传、账号/配额/凭据治理、插件清单与运行时不变式。区别在于：**治理不再是"开关"，而是"有指标、有上限、有审计、有人工回退"的持续运行能力**。
+
+### 3.9 发行工程：Profile / Bundle / Preset 是"平台化"的骨架
+
+"一切皆插件"只有在**能组合、能分发、能覆盖、能回滚**时才真正成立。profile（命名组合）→ bundle（发行物）→ patch（分层覆盖）→ preset（Agent 级组合）→ 可选实验包，构成了一条完整的"组合-分发"链。这是 dsh 从"框架"变成"平台"的机制基础。
+
+### 3.10 工程纪律作为护城河
+
+359 篇文档、≈526 条实现态决策记录、生成的 tool/config/persistence catalog、双语强制配对、文档字节预算、约 1500 个 spec。**这些"非功能性"资产恰恰是最难被复制的**：竞争对手可以模仿 API，很难模仿一套持续运转、机器强制的工程纪律。
+
+---
+
+## 四、Harness 演化趋势：九条结构性趋势
+
+> 每条：**现象 → 证据 → 洞察 → 启示**。
+
+### T1 · 从"框架"到"可发布的发行版"（Distribution Engineering）
+
+- 现象：profile/bundle/preset/可选实验包/桌面安装器。
+- 证据：`packages/bundle/*`、`docs/architecture.md#profiles-and-bundles`、`architecture/2026-08-05-profile-plugin-bundles.md`。
+- 洞察：Agent 框架的竞争焦点，正从"运行时能力"转向"如何把能力打包成用户能安装、能升级、能自定义的发行物"。**一切皆插件"的终点是"一切皆可发行"**。
+- 启示：评估 Harness 时，除了问"支持多少能力"，更要问"这些能力如何组合、如何分发、如何隔离与回滚"。
+
+### T2 · 能力接缝经济学（Seam Economy）
+
+- 现象：接缝数量爆炸，每个都是 Definition/Provider/Consumer 三元组；消费者可跨接缝联动（换 fs 提供者 = 换 Bash/PTY/LSP/沙箱）。
+- 证据：`docs/capability-seams.md`（数十个 `ctx.*` 接缝）。
+- 洞察：**抽象不是免费的**。接缝让系统可替换、可测试、可组合，但每个接缝都要设计完整三角色、维护契约、编写测试。成熟 Harness 的标志是**知道在哪里加接缝、在哪里用根因法收敛**（参见同期做减法）。
+- 启示：设计 Agent 系统时，把"可替换性"当资产来经营，同时用"接缝预算"约束复杂度。
+
+### T3 · 日志即脊梁（Log as Backbone）
+
+- 现象：会话格式 v0→v4、相邻迁移链、投影缓存、跨进程写租约、`Model-visible ⟺ Logged` 成为运行时不变式。
+- 证据：`packages/session/*`、`docs/architecture.md#session-log`。
+- 洞察：Harness 的正确性根基不在 prompt，而在**可重建的事实日志**。可重放（replay）→ 可迁移（migrate）→ 可缓存（projection cache）→ 可并发（lease），是同一根脊梁的四次加固。
+- 启示：如果系统无法从日志重建任意一次模型请求，它就不具备生产级的可审计性；日志格式的版本化与迁移纪律，是长期演进的前提。
+
+### T4 · 从单体 Agent 到"有状态的多智能体组织"
+
+- 现象：Agent Teams（花名册/任务 DAG/邮箱）、Workflow（程序化扇出）、Goal（目标续做）、Schedule（定时唤醒）、continuable subagent（冷恢复）。
+- 证据：`experimental/agent-team*`、`workflow/*`、`goal/*`、`schedule/*`、`subagent/subagent`。
+- 洞察：多智能体的难点不是"能 spawn"，而是**持久身份 + 共享状态 + 冲突与权限**。dsh 的策略是"团队状态落在根会话日志上"，从而复用事件溯源的全部好处。
+- 启示：设计多 Agent 协作时，先确定"共享状态的唯一事实源"，再谈通信协议。
+
+### T5 · 执行世界的可替换性（One Seam, Many Worlds）
+
+- 现象：`subprocess`/`fs`/`sandbox` 既有 local、sandbox，也有 SSH 提供者；PTC 与 Workflow 复用同一沙箱；持久终端只是一个 shell 后端。
+- 证据：`packages/ssh/*`、`packages/sandbox/*`、`architecture/2026-09-11-posix-ssh-runtime.md`。
+- 洞察：同一份策略，可以在本地、沙箱、远端三种"执行世界"中一致执行——治理因此可以**跟随执行位置移动，而不是绑定在某台机器上**。
+- 启示：把"执行环境"当作可注入的 provider，而不是把路径/命令硬编码进业务逻辑。
+
+### T6 · 与模型 API 协同进化（Cache-aware, Protocol-modern）
+
+- 现象：动态工具更新 + tool-changes beta 头、系统提示入 surface、一等 tool-role 消息、Anthropic Messages 协议收敛。
+- 证据：`architecture/2026-09-20-dynamic-tool-updates.md`、`2026-09-02-system-prompt-as-surface-node.md`、`2026-09-15-first-class-tool-role-messages.md`。
+- 洞察：Harness 不再是被动的"外层壳"，而是与模型协议层**互相迁就、共同设计**。缓存命中率、提示稳定性、工具目录变更的可控性，正成为 Harness 的核心指标。
+- 启示：关注模型侧新特性（prompt caching、tool 变更、role 语义）时，要同步设计 Harness 的日志与投影语义。
+
+### T7 · 从"能用"到"可运营"（Operationalization）
+
+- 现象：崩溃报告/致命诊断、有界遥测与日志上传、插件清单与运行时不变式、账号/配额/凭据治理、Auto Review。
+- 证据：`architecture/2026-09-22-fatal-diagnostics-and-crash-reports.md`、`2026-09-24-bounded-session-log-upload.md`、`packages/credentials/*`。
+- 洞察：能演示 ≠ 能上生产。运营能力（可诊断、可限流、可审计、可人工介入）是产品与玩具的分水岭。
+- 启示：给 Agent 系统排优先级时，把"故障可诊断"和"资源有上限"放在与新功能同等重要的位置。
+
+### T8 · 本地优先 + 自主可控（Local-first & Sovereign）
+
+- 现象：Electron 内置完整运行时、原生 Landlock/flock 原语、桌面/CLI 共享数据但独立锁文件、双 SDK（TS/Python）+ 单文件运行时、MIT 开源。
+- 证据：`apps/desktop/*`、`native/system/*`、`python/*`。
+- 洞察：在"数据不外流、环境不漂移、供应商不锁定"的企业诉求下，**本地内置运行时 + 开源核心**是一条差异化路线，与云端闭源 Agent 形成对照。
+- 启示：技术自主性是可采用性的前提；发行形态（本地/云）本身就是一个战略选择。
+
+### T9 · 工程纪律即护城河（Discipline as Moat）
+
+- 现象：文档字节预算、双语强制配对、生成的 catalog、约 1500 spec、约 526 条决策记录、fail-loud、机器强制门禁。
+- 证据：`docs/AGENTS.md`（预算）、`packages/README.md`、`.agents/notes/implemented/*`。
+- 洞察：功能会被复制，**持续运转的工程纪律很难被复制**。这正是 dsh "可靠性 = 工程化，而非 prompt 调优"论点的组织级体现。
+- 启示：投资于可执行的规范（lint/gate/budget/decision log），其回报是长期的可维护性，而非短期功能数。
+
+---
+
+## 五、对既有研究的更新
+
+### 5.1 上下文管理与记忆（对比 `dsh-上下文管理记忆-架构研究报告-2026-08-23`）
+
+原报告的核心公理（日志为唯一事实源、surface 三事件、压缩=缩小投影而非删除记忆）**依然成立且被加固**。本次新增：
+
+| 方向 | 2026-08 基线 | 0.2.0-rc.2 新增 |
+|---|---|---|
+| 日志格式 | v0 结构 | v3 规范信封 + v4 一等 tool-role 消息 |
+| 系统提示 | `request/header` 字段 | 成为 surface 节点 0，可替换、可压缩保护 |
+| 工具目录 | 静态 header | 动态更新（`request/header.tools` + `developer/message`） |
+| 投影 | 每步折叠 | `session-projection-cache` 持久化 + 跨版本读 |
+| 压缩 | text summary + tool-result prune | 增加 image offload、checkpoint policy |
+| 跨会话 | session-reference | 客户端会话引用 + 有界 model budget/spill 复用 |
+
+**更新后的关键认知**：`Model-visible ⟺ Logged` 已从"不变量"升级为"可迁移 + 可缓存 + 可并发的工程体系"；上下文管理的重心正从"如何压缩"转向"如何让投影可缓存、迁移可验证"。
+
+### 5.2 上下文路由与 SubAgent 分治（对比 `dsh-上下文路由与SubAgent分治-对比Codex-2026-08-23`）
+
+原来的"异构能力接缝 vs 同构线程"对比依然有效，但 dsh 一方发生了**结构化升级**：
+
+| 维度 | 2026-08 | 0.2.0-rc.2 |
+|---|---|---|
+| 子代理形态 | one-shot + continuable | 增加 **Agent Teams**（花名册/任务 DAG/邮箱） |
+| 生命周期 | continuable 冷恢复 | 增加 **activation capacity**、人工 inbox 控制（Queue/Steer/Edit/Remove） |
+| 路由 | provider 声明 | 增加模型选择路由 + 用户授权路由 |
+| 编排 | 模型逐次调用 | 增加 **Workflow 脚本 + PTC** 程序化扇出 |
+| 审计 | descriptor 事件 | 团队状态全部落入根 Session 日志，可重放 |
+
+**更新后的对比结论**：dsh 用"**能力接缝 + 事件溯源**"承载异构与审计，Codex 用"**同构线程 + 工具族**"承载一致性与简洁。0.2 的 dsh 在保持异构优势的同时，补上了"团队、编排、调度"这些原本属于 Codex 强项的长时程协作能力，两者的差距从"哲学不同"收敛为"取舍不同"。
+
+### 5.3 五大创新的演化（对比 `新发布的DeepSeek Harness的五大创新及其启示`）
+
+| 原"创新" | 0.2.0-rc.2 的演进 |
+|---|---|
+| ① 会改写自己的运行时 | 保留并收敛（`extensions/*` + `dynamicCordisRunner`），同时新增 **declarative presets** 作为更安全的常规组合方式；`tool-cordis` 与 inspector 提供跨 realm 检视 |
+| ② 事件溯源 + 可重放会话 | 升级为 v3/v4 + 迁移链 + 投影缓存 + 跨进程写租约（**本章 T3**） |
+| ③ 异构子代理协议 | 扩展为 **Agent Teams + Workflow/PTC + continuable activation**（**T4**） |
+| ④ 可移植沙箱 + fail-closed | 扩展为**可运营治理**（Windows ACL、Auto Review、崩溃诊断、有界遥测）（**T7**） |
+| ⑤ 可靠性当作工程纪律 | 演化为**发行工程 + 工程纪律双轮**（profile/bundle + doc budgets + decision log）（**T1/T9**） |
+
+---
+
+## 六、与 Claude Code / Codex 的对比（2026-10 更新）
+
+| 维度 | DeepSeek Harness 0.2.0-rc.2 | Claude Code | Codex |
+|---|---|---|---|
+| 架构定位 | 可组合 Agent 操作系统（profile/bundle） | CLI Agent | CLI Agent |
+| 交付形态 | CLI / Web / **Desktop(Electron)** / ACP / JSON-RPC SDK / Python SDK | Web IDE | Web IDE |
+| 会话可观测 | 事件日志 + v0→v4 迁移 + 投影缓存 + FTS5 检索 | 黑盒 | 黑盒 |
+| 多智能体 | 异构子代理 + **Agent Teams** + Workflow/PTC | 有限 | 同构线程工具族 |
+| 长时程 | **Jobs + Schedule + Goal + Plan** | 有限 | 有限 |
+| 执行世界 | local / sandbox / **SSH** / PTC，同一接缝 | 本地为主 | 本地为主 |
+| 跨平台沙箱 | bwrap/Landlock/Seatbelt/**Win-ACL** | 仅 Linux | 仅 Linux |
+| 浏览器/桌面操作 | Browser-use + Computer-use 接缝 | 有 | 有 |
+| 治理运营 | 崩溃报告 + 有界遥测 + 账号/配额 + Auto Review | 内部 | 内部 |
+| 开源 | MIT + 完整决策记录 | 闭源 | 闭源 |
+
+**关键差异（更新版）**：dsh 的护城河不再是"某个新功能"，而是**"发行 × 接缝 × 事件溯源 × 工程纪律"四者叠加形成的系统可演进性**。
+
+---
+
+## 七、风险与张力（批判性视角）
+
+1. **复杂性预算**：55 组 / 316 包 / 数十接缝 / 21 个实验包。可组合性以认知与维护成本为代价。长期看，"如何让新贡献者不被淹没"是最大挑战。
+2. **版本不稳定**：官方明确"会有兼容性破坏"，格式已跳到 v4，API 预稳定。企业采用需承担跟进成本。
+3. **可选包与实验的边界**：实验能力（Teams/语音/Auto review/Schedule）默认关闭、以可选 bundle 发布——这是好设计，但也意味着"发布态"与"能力态"之间存在落差，评估时需明确启用组合。
+4. **迁移纪律的成本**：相邻迁移链 + 永不删除提交代，是极强的正确性保证，但要求每个版本变更都配套迁移包与验证。这是纪律的代价，也是纪律的价值。
+5. **与模型的耦合**：动态工具、system prompt surface、tool-changes beta 等特性与 DeepSeek 模型侧深度耦合。换用其它模型时，这些优化的收益可能下降。
+
+---
+
+## 八、给企业 / 团队的启示
+
+1. **问"能跑"之前，先问"能装、能升、能诊"**：发行形态（本地/云/桌面）与升级、诊断能力，决定 Agent 能否进入生产。
+2. **把"共享状态的唯一事实源"作为多 Agent 设计的第一决策**：dsh 选择会话日志；你的系统选什么？
+3. **抽象要经营，不要堆砌**：能力接缝带来可替换性，但每个接缝都要完整三角色与测试；用"接缝预算"约束复杂度。
+4. **能写成代码的，不要让模型每次都去"想"**：Workflow/PTC 用确定性程序替代概率性多轮推理，是可靠性工程的方向。
+5. **治理要可运营，而非只是开关**：可诊断、有上限、可审计、可人工回退，才算治理闭环。
+6. **投资可执行的工程纪律**：文档预算、决策记录、生成式 catalog、双语配对——短期无趣，长期是护城河。
+
+---
+
+## 九、结语
+
+0.1 时代的 dsh 回答了"Agent 系统应当长什么样"：事件溯源、能力接缝、可重放、fail-closed。
+
+0.2.0-rc.2 回答了一个更难的问题：**"这样的系统如何变成一个真实存在、可安装、可组合、可运营、可持续演进的产品？"** 它的答案不是某个单点功能，而是一整套结构性机制——发行工程（profile/bundle）、能力接缝经济、日志脊梁的四次加固、有状态的多智能体组织、以及把工程纪律本身当作产品竞争力。
+
+由此看到的九条趋势，正在把 **Harness Engineering** 从"工程师 + 好的 prompt"推进为一门真正的系统工程学科：
+
+> **框架比的是能力，操作系统比的是秩序。dsh 0.2.0-rc.2 的价值，不在它多了什么功能，而在它把"秩序"变成了可安装、可组合、可审计的工程事实。**
+
+---
+
+*配套文件：`FILE_INDEX.dsh-0.2.0-rc.2.md`（源码索引）· 本文档对应的 HTML 版本。分析基于 `deepseek-harness-master`（0.2.0-rc.2，2026-09-29 快照）源码与文档，路径均可回溯。*

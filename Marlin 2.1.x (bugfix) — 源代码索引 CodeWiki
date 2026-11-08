@@ -1,0 +1,635 @@
+# Marlin 2.1.x (bugfix) — 源代码索引 CodeWiki
+
+> Marlin 是部署量最大的开源 3D 打印机固件之一，采用 GPLv3 许可。它介于上位机（切片软件/主机）与打印机硬件之间：把 G-code 运动指令翻译为精确的步进电机脉冲，并负责温度闭环控制、外设管理与 UI。本分支 `bugfix-2.1.x` 同时支持 32 位 ARM 与 8 位 AVR 主板，最多 9 轴联动、8 个挤出机，覆盖 400+ 引脚配置、24 个板卡族与 80+ 可选功能模块。构建基于 PlatformIO（Arduino 框架），源码约 60 万行 C/C++。
+
+本索引将整个仓库按「仓库层 → Arduino sketch 层 → 应用源码层（HAL / 模块 / 特性 / G-code / UI / 板卡）」逐层展开，说明每个目录与关键文件的职责。
+
+---
+
+## 目录结构总览
+
+| 顶层目录/文件 | 类型 | 说明 |
+| --- | --- | --- |
+| `.devcontainer/` | dir | VS Code Dev Container 定义，用于统一开发环境 |
+| `.github/` | dir | CI 工作流、Issue/PR 模板、社区规范 |
+| `.vscode/` | dir | VS Code 工作区配置 |
+| `.zed/` | dir | Zed 编辑器配置 |
+| `Marlin/` | dir | Arduino “sketch” 应用源码与用户配置文件（核心） |
+| `buildroot/` | dir | 构建基础设施：PlatformIO 脚本、板卡定义、工具脚本、技能文档 |
+| `config/` | dir | 仅含 README，指向独立配置仓库 |
+| `docker/` | dir | Docker 可复现构建环境 |
+| `docs/` | dir | 面向开发者的设计与协议文档 |
+| `ini/` | dir | PlatformIO 各平台（AVR/STM32/ESP32…）配置文件 |
+| `test/` | dir | 根级构建/单元测试配置 |
+| `.aiderignore` | file | Aider AI 工具忽略规则 |
+| `.editorconfig` | file | 跨编辑器统一代码风格 |
+| `.gitattributes` | file | Git 属性（换行/语言统计等） |
+| `.gitignore` | file | Git 忽略规则 |
+| `.prettierignore` | file | Prettier 忽略规则 |
+| `AGENTS.md` | file | 面向 AI/贡献者的仓库导航与规范 |
+| `LICENSE` | file | GNU GPL v3.0 许可证 |
+| `Makefile` | file | 传统 make 构建入口（含模拟器） |
+| `README.md` | file | 项目介绍、分支说明、贡献入口 |
+| `platformio.ini` | file | PlatformIO 主配置（含 `extra_configs` 平台索引） |
+
+---
+
+## 1. `Marlin/` — Arduino Sketch 根目录
+
+Marlin 在 Arduino 体系下以 “sketch” 形式组织。此目录同时承载用户配置、应用源码、集成库和测试。
+
+### 1.1 Marlin 顶层文件
+
+| 文件 | 路径 | 说明 |
+| --- | --- | --- |
+| `Configuration.h` | `Marlin/Configuration.h` | 用户硬件与功能主配置（板卡、轴、温度、限位、挤出机等） |
+| `Configuration_adv.h` | `Marlin/Configuration_adv.h` | 高级/实验性功能开关，遵循严格的插入顺序 |
+| `Marlin.ino` | `Marlin/Marlin.ino` | Arduino 入口桩，转发到 MarlinCore |
+| `Version.h` | `Marlin/Version.h` | 固件版本、机器名、源码 URL、协议版本 |
+| `config.ini` | `Marlin/config.ini` | PlatformIO 项目级额外配置 |
+| `Makefile` | `Marlin/Makefile` | sketch 级构建（主要用于 Linux 模拟器） |
+
+### 1.2 `Marlin/lib/` — 集成库
+
+空的包目录，供 PlatformIO 放置私有库。
+
+### 1.3 `Marlin/tests/` — 单元测试
+
+基于 native 模拟器运行的单元测试（`make unit-test-all-local`）。
+
+| 测试目录 | 路径 | 说明 |
+| --- | --- | --- |
+| core | `Marlin/tests/core/` | 宏、类型、数字转字符串等基础工具测试（`test_macros.cpp`、`test_types.cpp`、`test_numtostr.cpp`） |
+| feature | `Marlin/tests/feature/` | 特性逻辑测试（`test_runout.cpp` 断料检测） |
+| gcode | `Marlin/tests/gcode/` | G-code 解析/执行测试（`test_gcode.cpp`） |
+| module | `Marlin/tests/module/` | 模块测试（`test_heater_watch.cpp` 加热看门狗） |
+| pins | `Marlin/tests/pins/` | 引脚调试测试（`test_pinsdebug.cpp`） |
+
+---
+
+## 2. `Marlin/src/` — 应用源代码（核心）
+
+应用源码根目录，遵循「HAL → 核心模块 → 特性 → G-code / UI」的分层架构。共约 600,000 行 C/C++。
+
+### 2.0 src 顶层
+
+| 文件 | 路径 | 说明 |
+| --- | --- | --- |
+| `MarlinCore.cpp` | `Marlin/src/MarlinCore.cpp` | 固件入口：`setup()`/`loop()`、全局单例 `marlin`、初始化与主循环 |
+| `MarlinCore.h` | `Marlin/src/MarlinCore.h` | `Marlin` 单例类、`MarlinState` 状态机、`safe_delay()` 声明 |
+
+### 2.1 `core/` — 核心工具库（18 个文件）
+
+跨平台基础类型、串口抽象、调试、语言与通用工具。
+
+| 文件 | 路径 | 说明 |
+| --- | --- | --- |
+| `boards.h` | `core/boards.h` | 板卡 ID 枚举与板卡名称映射 |
+| `bug_on.h` | `core/bug_on.h` | 编译期断言 / 静态检查宏 |
+| `debug_out.h` | `core/debug_out.h` | 调试输出宏与开关 |
+| `debug_section.h` | `core/debug_section.h` | `SETUP_RUN()` 等调试分区执行宏 |
+| `drivers.h` | `core/drivers.h` | 步进驱动类型枚举与能力判断 |
+| `endianness.h` | `core/endianness.h` | 字节序判断与转换辅助 |
+| `language.h` | `core/language.h` | 语言字符串选择入口 |
+| `macros.h` | `core/macros.h` | 通用宏工具箱（`ENABLED`、`ANY`、`TERN` 等） |
+| `millis_t.h` | `core/millis_t.h` | 毫秒时间类型定义 |
+| `mstring.h` | `core/mstring.h` | 轻量定长字符串模板 `MString<N>` |
+| `multi_language.h` | `core/multi_language.h` | 多语言支持框架 |
+| `serial.cpp/.h` | `core/serial.cpp`、`core/serial.h` | 串口聚合接口与宏路由 |
+| `serial_base.h` | `core/serial_base.h` | 串口设备基类/接口 |
+| `serial_hook.h` | `core/serial_hook.h` | 串口钩子（透传/回调） |
+| `types.h` | `core/types.h` | 统一基础类型与轴/坐标类型 |
+| `utility.cpp/.h` | `core/utility.cpp`、`core/utility.h` | 通用工具函数（解析、位操作等） |
+
+### 2.2 `gcode/` — G-code 子系统（198 个文件）
+
+负责指令的**入队、解析、分发**，并按 14 个功能类别组织命令处理器。
+
+#### 2.2.1 G-code 核心
+
+| 文件 | 路径 | 说明 |
+| --- | --- | --- |
+| `gcode.cpp/.h` | `gcode/gcode.cpp` | `GcodeSuite` 分发器：`process_commands()` 及各类命令路由 |
+| `gcode_d.cpp` | `gcode/gcode_d.cpp` | 调试/开发用 G-code 处理 |
+| `parser.cpp/.h` | `gcode/parser.cpp` | `GCodeParser`：字母/编号/子码与参数提取（可选 FASTER_GCODE_PARSER） |
+| `queue.cpp/.h` | `gcode/queue.cpp` | `GCodeQueue` 环形缓冲；串口/SD/PROGMEM 三路注入口 |
+
+#### 2.2.2 命令类别子目录
+
+| 类别目录 | 路径 | 关键命令 | 说明 |
+| --- | --- | --- | --- |
+| 运动 | `gcode/motion/` | G0/G1, G2/G3, G4, G5, G6, G80, M290, M400 | 直线/圆弧/贝塞尔插补、延时、等待 |
+| 温度 | `gcode/temp/` | M104/M109, M105, M106/M107, M140/M190, M141/M191, M143/M193, M155, M192, M303, M306, M86/M87 | 喷头/热床温度、风扇、PID 自整定、温度报告 |
+| 配置 | `gcode/config/` | M92, M200-M205, M210, M217, M218, M220, M221, M281, M301, M302, M304, M305, M309, M43, M540, M550, M575, M672 | 步数、加速度/回抽、PID、偏移、网络参数 |
+| 校准 | `gcode/calibrate/` | G28, G33, G34, G425, G76, M12, M48, M100, M425, M665, M666, M852 | 回零、Delta 校准、探针、背隙、网格 |
+| 几何 | `gcode/geometry/` | G17-G19, G53-G59, G92, M206, M428 | 平面选择、坐标系、位置重置 |
+| 控制 | `gcode/control/` | M3-M5, M7-M9, M10/M11, M17/M18/M84, M42, M80/M81, M85, M108/M112/M410, M111, M120/M121, M211, M226, M280, M282, M350/M351, M380/M381, M605, M993/M994, M997, M999, T | 主轴/激光、冷却、使能、电源、工具切换、保护 |
+| 探针 | `gcode/probe/` | G30, G31/G32, G38, M102, M401/M402, M423, M851, M951 | 探针测量、Z 偏移、收纳 |
+| SD 卡 | `gcode/sd/` | M20-M34, M524, M808, M928, M1001, M1003 | 文件列表/选择/打印/停止/循环 |
+| 床调平 | `gcode/bedlevel/` | G26, G35, G42, M420 + `abl/` `mbl/` `ubl/` | 网格验证、自动/手动/统一床调平 |
+| 主机 | `gcode/host/` | M16, M110, M113, M114, M115, M118, M119, M154, M194, M360, M876 | 行号、机器信息、限位报告、运动学配置 |
+| LCD | `gcode/lcd/` | M0/M1, M73, M117, M145, M250, M255, M256, M300, M414, M995 | 暂停、进度、消息、颜色、蜂鸣 |
+| EEPROM | `gcode/eeprom/` | M500-M504 | 保存/加载/重置/导出设置 |
+| 统计 | `gcode/stats/` | M31, M72, M75-M78, M79 | 打印时间、耗材、错误、缓冲统计 |
+| 单位 | `gcode/units/` | G20/G21, M82/M83, M149 | 公制/英制、挤出模式、温度单位 |
+| OTA | `gcode/ota/` | M936 | 空中固件升级 |
+| WiFi | `gcode/wifi/` | M930 | WiFi 相关命令 |
+| SCARA | `gcode/scara/` | M360-M364 | SCARA 运动学配置 |
+| 特性 | `gcode/feature/` | 各特性子命令 | `adc`、`advance`、`baricuda`、`camera`、`cancel`、`caselight`、`clean`、`controllerfan`、`digipot`、`filwidth`、`ft_motion`、`fwretract`、`i2c`、`input_shaping`、`leds`、`macro`、`mixing`、`network`、`nonlinear`、`password`、`pause`、`power_monitor`、`powerloss`、`prusa_MMU2`、`resonance`、`rs485`、`runout`、`trinamic` |
+
+### 2.3 `module/` — 核心运动/热管理模块（110 个文件）
+
+| 文件/目录 | 路径 | 说明 |
+| --- | --- | --- |
+| `motion.*` | `module/motion.cpp` | 高层轴定位、坐标变换、相对模式、双 X 小车 |
+| `planner.*` | `module/planner.cpp` | 运动块缓冲、梯形速度曲线、jerk/junction deviation |
+| `planner_bezier.*` | `module/planner_bezier.cpp` | 贝塞尔曲线规划（G5） |
+| `stepper.*` | `module/stepper.cpp` | 步进脉冲生成、方向控制、TMC 配置入口 |
+| `temperature.*` | `module/temperature.cpp` | PID 闭环、热敏电阻、安全监控、M303 自整定 |
+| `endstops.*` | `module/endstops.cpp` | 限位中断、回零、软限位 |
+| `probe.*` | `module/probe.cpp` | 探针（G30/G38/BLTouch）、Z 偏移 |
+| `settings.*` | `module/settings.cpp` | EEPROM 持久化、设置存取 |
+| `printcounter.*` | `module/printcounter.cpp` | 打印时长/耗材/任务统计 |
+| `servo.*` | `module/servo.cpp` | 舵机控制（电磁铁、盖板等） |
+| `fans.*` | `module/fans.cpp` | 风扇 PWM 管理 |
+| `tool_change.*` | `module/tool_change.cpp` | 多挤出机切换、热端偏移、PTFE 冲洗 |
+| `delta.*` | `module/delta.cpp` | Delta 运动学变换 |
+| `scara.*` | `module/scara.cpp` | SCARA 运动学变换 |
+| `polar.*` | `module/polar.cpp` | 极坐标运动学 |
+| `polargraph.*` | `module/polargraph.cpp` | Polargraph 运动学 |
+| `ft_motion.*` | `module/ft_motion.cpp` | 精细运动（输入整形）入口 |
+| `stepper/` | `module/stepper/` | 步进内部实现：`control.cpp`、`indirection.cpp`、`trinamic.cpp`、`speed_lookuptable.h`、`cycles.h` |
+| `ft_motion/` | `module/ft_motion/` | 恒加加速度规划与整形：`constant_jolt_planner`、`trajectory_constant_jolt`、`trajectory_poly5/poly6`、`shaping`、`smoothing` |
+| `thermistor/` | `module/thermistor/` | 53 个热敏电阻温度表（`thermistor_1.h` … `thermistor_1047.h`）+ `thermistors.h` 路由 |
+
+### 2.4 `feature/` — 可选特性系统（187 个文件）
+
+以 `#if ENABLED(FEATURE)` 门控的 80+ 可选模块。根目录为单文件特性，子目录为复合特性。
+
+#### 2.4.1 根目录单文件特性（42 个 .cpp）
+
+| 模块 | 路径 | 说明 |
+| --- | --- | --- |
+| `ammeter` | `feature/ammeter.cpp` | 电流计（电源监控） |
+| `babystep` | `feature/babystep.cpp` | Z 轴微调（baby stepping） |
+| `backlash` | `feature/backlash.cpp` | 背隙补偿 |
+| `baricuda` | `feature/baricuda.cpp` | Baricuda 挤出机 |
+| `binary_stream` | `feature/binary_stream.cpp` | 二进制文件传输协议 |
+| `bltouch` | `feature/bltouch.cpp` | BLTouch 探针控制 |
+| `cancel_object` | `feature/cancel_object.cpp` | 单对象取消 |
+| `caselight` | `feature/caselight.cpp` | 机箱照明 |
+| `closedloop` | `feature/closedloop.cpp` | 闭环步进 |
+| `controllerfan` | `feature/controllerfan.cpp` | 主板风扇控制 |
+| `cooler` | `feature/cooler.cpp` | 激光/主轴冷却器 |
+| `direct_stepping` | `feature/direct_stepping.cpp` | 直接步进 |
+| `e_parser` | `feature/e_parser.cpp` | 挤出量解析器 |
+| `easythreed_ui` | `feature/easythreed_ui.cpp` | Easythreed 简易 UI |
+| `encoder_i2c` | `feature/encoder_i2c.cpp` | I2C 编码器 |
+| `ethernet` | `feature/ethernet.cpp` | 以太网连接 |
+| `fancheck` | `feature/fancheck.cpp` | 风扇转速检测 |
+| `fanmux` | `feature/fanmux.cpp` | 风扇多路复用 |
+| `filwidth` | `feature/filwidth.cpp` | 线材宽度测量 |
+| `fwretract` | `feature/fwretract.cpp` | 固件回抽 |
+| `host_actions` | `feature/host_actions.cpp` | 主机动作/提示 |
+| `hotend_idle` | `feature/hotend_idle.cpp` | 热端空闲降温 |
+| `joystick` | `feature/joystick.cpp` | 摇杆输入 |
+| `max7219` | `feature/max7219.cpp` | MAX7219 LED 点阵 |
+| `meatpack` | `feature/meatpack.cpp` | MeatPack 压缩协议 |
+| `mixing` | `feature/mixing.cpp` | 混合挤出机 |
+| `pause` | `feature/pause.cpp` | 暂停/恢复 |
+| `power` | `feature/power.cpp` | 电源控制 |
+| `power_monitor` | `feature/power_monitor.cpp` | 电源监控 |
+| `powerloss` | `feature/powerloss.cpp` | 断电续打 |
+| `probe_temp_comp` | `feature/probe_temp_comp.cpp` | 探针温度补偿 |
+| `repeat` | `feature/repeat.cpp` | 定时重复 |
+| `rs485` | `feature/rs485.cpp` | RS485 通信 |
+| `runout` | `feature/runout.cpp` | 断料检测 |
+| `solenoid` | `feature/solenoid.cpp` | 电磁铁控制 |
+| `spindle_laser` | `feature/spindle_laser.cpp` | 主轴/激光 |
+| `stepper_driver_safety` | `feature/stepper_driver_safety.cpp` | 驱动安全检测 |
+| `tmc_util` | `feature/tmc_util.cpp` | Trinamic 驱动工具 |
+| `tramming` | `feature/tramming.cpp` | 床面/龙门校准 |
+| `twibus` | `feature/twibus.cpp` | TwoWire/I2C 总线封装 |
+| `x_twist` | `feature/x_twist.cpp` | X 轴扭曲补偿 |
+| `z_stepper_align` | `feature/z_stepper_align.cpp` | Z 步进对齐 |
+
+#### 2.4.2 特性子目录
+
+| 目录 | 路径 | 说明 |
+| --- | --- | --- |
+| `adc/` | `feature/adc/` | MCP3426 ADC 驱动 |
+| `bedlevel/` | `feature/bedlevel/` | 床调平总入口 + `abl/`（自动）、`mbl/`（手动）、`ubl/`（统一）、`bdl/`（双向）、`hilbert_curve` |
+| `dac/` | `feature/dac/` | DAC 驱动：DAC084S085、MCP4728、步进 DAC |
+| `digipot/` | `feature/digipot/` | 数字电位器：MCP4018、MCP4451 |
+| `leds/` | `feature/leds/` | LED 控制：BlinkM、NeoPixel、PCA9533、PCA9632、事件灯、温度状态灯 |
+| `mks_wifi/` | `feature/mks_wifi/` | MKS WiFi 模块（STM32/F1 串口、上传、UI） |
+| `mmu/` | `feature/mmu/` | 多材料单元：MMU2、Chameleon |
+| `mmu3/` | `feature/mmu3/` | MMU3（协议、CRC、进度、日志、SpoolJoin、声音等） |
+| `password/` | `feature/password/` | 密码保护 |
+| `resonance/` | `feature/resonance/` | 共振补偿生成器 |
+
+### 2.5 `libs/` — 通用工具库（35 个文件）
+
+| 文件/目录 | 路径 | 说明 |
+| --- | --- | --- |
+| `vector_3.*` | `libs/vector_3.cpp` | 三维向量运算 |
+| `bresenham.h` | `libs/bresenham.h` | Bresenham 直线算法 |
+| `circularqueue.h` | `libs/circularqueue.h` | 通用环形队列 |
+| `crc16.*` | `libs/crc16.cpp` | CRC-16 校验 |
+| `least_squares_fit.*` | `libs/least_squares_fit.cpp` | 最小二乘拟合 |
+| `stopwatch.*` | `libs/stopwatch.cpp` | 计时器 |
+| `numtostr.*` | `libs/numtostr.cpp` | 数字转字符串（格式化） |
+| `hex_print.*` | `libs/hex_print.cpp` | 十六进制打印 |
+| `duration_t.h` | `libs/duration_t.h` | 时长格式化类型 |
+| `autoreport.h` | `libs/autoreport.h` | 定期报告辅助 |
+| `buzzer.*` | `libs/buzzer.cpp` | 蜂鸣器 |
+| `nozzle.*` | `libs/nozzle.cpp` | 喷嘴清洗 |
+| `softspi.h` | `libs/softspi.h` | 软件 SPI |
+| `private_spi.h` | `libs/private_spi.h` | 私有 SPI 封装 |
+| `BL24CXX.*` | `libs/BL24CXX.cpp` | BL24CXX EEPROM 驱动 |
+| `W25Qxx.*` | `libs/W25Qxx.cpp` | W25Qxx SPI Flash 驱动 |
+| `MAX31865.*` | `libs/MAX31865.cpp` | MAX31865 RTD 温度芯片 |
+| `heatshrink/` | `libs/heatshrink/` | 嵌入式压缩解码器（用于 SD 打印） |
+| `adc/` | `libs/adc/` | ADS1118 ADC 驱动 |
+
+### 2.6 `sd/` — SD 卡 / 存储子系统（68 个文件）
+
+| 文件/目录 | 路径 | 说明 |
+| --- | --- | --- |
+| `cardreader.*` | `sd/cardreader.cpp` | SD 卡门面：挂载、文件列表、启停打印 |
+| `Sd2Card.*` | `sd/Sd2Card.cpp` | SD 卡底层块设备（SPI/SDIO） |
+| `SdBaseFile.*` | `sd/SdBaseFile.cpp` | 文件基类（目录/读写） |
+| `SdFile.*` | `sd/SdFile.cpp` | 文件对象 |
+| `SdVolume.*` | `sd/SdVolume.cpp` | FAT 卷管理 |
+| `SdFatConfig.h` | `sd/SdFatConfig.h` | SdFat 裁剪配置 |
+| `SdFatStructs.h` | `sd/SdFatStructs.h` | FAT 数据结构 |
+| `SdInfo.h` | `sd/SdInfo.h` | 卡信息结构 |
+| `SdFatUtil.*` | `sd/SdFatUtil.cpp` | SdFat 工具 |
+| `disk_io_driver.h` | `sd/disk_io_driver.h` | 磁盘 I/O 驱动抽象接口 |
+| `storage.h` | `sd/storage.h` | 存储介质抽象（SD/USB） |
+| `gcode_thumbnail.*` | `sd/gcode_thumbnail.cpp` | G-code 缩略图 |
+| `usb_flashdrive/` | `sd/usb_flashdrive/` | USB 闪存盘支持（`lib-uhs2`、`lib-uhs3`） |
+
+### 2.7 `lcd/` — 显示与 UI 子系统（1039 个文件）
+
+UI 通过 `MarlinUI` 路由到各类显示后端。
+
+| 文件/目录 | 路径 | 说明 |
+| --- | --- | --- |
+| `marlinui.*` | `lcd/marlinui.cpp` | UI 控制器/状态机（主入口） |
+| `lcdprint.*` | `lcd/` | 通用 LCD 打印抽象 |
+| `utf8.*` | `lcd/` | UTF-8 处理 |
+| `buttons.h` | `lcd/` | 按键输入定义 |
+| `scaled_tft.h` | `lcd/` | TFT 缩放常量 |
+| `thermistornames.h` | `lcd/` | 热敏电阻名称显示 |
+| `HD44780/` | `lcd/HD44780/` | 字符型 HD44780 LCD（含 `mighty/` 变体） |
+| `TFTGLCD/` | `lcd/TFTGLCD/` | TFT 模拟图形 LCD |
+| `dogm/` | `lcd/dogm/` | DOGM OLED/LCD（u8glib）：字体、状态屏、游戏、`status/`、`u8g/` |
+| `tft/` | `lcd/tft/` | Marlin 自有 TFT UI：画布、字体、主题、触摸、各分辨率 UI |
+| `tft_io/` | `lcd/tft_io/` | TFT 控制器驱动（ILI9328/9341/9488、ST7735/7789/7796、SSD1963、R65105 等）与触摸校准 |
+| `dwin/` | `lcd/dwin/` | DWIN 串口屏（`common`、`creality`、`jyersui`、`marlinui`、`proui`） |
+| `extui/` | `lcd/extui/` | 可扩展 UI（ExtUI）后端与 `ui_api` |
+| `menu/` | `lcd/menu/` | 经典菜单系统（主菜单、配置、温度、运动、调平、TMC 等） |
+| `touch/` | `lcd/touch/` | 触摸按键 |
+| `language/` | `lcd/language/` | 37 种语言字符串表 `language_*.h` |
+| `rts/` | `lcd/rts/` | RTS 显示 |
+| `sovol_rts/` | `lcd/sovol_rts/` | Sovol RTS 显示 |
+
+#### 2.7.1 ExtUI 后端（`lcd/extui/`）
+
+| 后端 | 路径 | 文件数 | 说明 |
+| --- | --- | --- | --- |
+| `ui_api` | `lcd/extui/ui_api.cpp` | 2 | ExtUI 统一 API |
+| `anycubic` | `lcd/extui/anycubic/` | 3 | Anycubic 基础屏 |
+| `anycubic_chiron` | `lcd/extui/anycubic_chiron/` | 6 | Anycubic Chiron |
+| `anycubic_i3mega` | `lcd/extui/anycubic_i3mega/` | 3 | Anycubic i3 Mega |
+| `anycubic_kobra` | `lcd/extui/anycubic_kobra/` | 10 | Anycubic Kobra |
+| `anycubic_vyper` | `lcd/extui/anycubic_vyper/` | 6 | Anycubic Vyper |
+| `cr10spro_v2` | `lcd/extui/cr10spro_v2/` | 3 | CR-10S Pro V2 |
+| `dgus` | `lcd/extui/dgus/` | 24 | DWIN DGUS 通用 |
+| `dgus_e3s1pro` | `lcd/extui/dgus_e3s1pro/` | 29 | Ender-3 S1 Pro DGUS |
+| `dgus_reloaded` | `lcd/extui/dgus_reloaded/` | 23 | DGUS 重构版 |
+| `elegoo_neptune_3` | `lcd/extui/elegoo_neptune_3/` | 3 | Elegoo Neptune 3 |
+| `example` | `lcd/extui/example/` | 1 | 示例后端 |
+| `ftdi_eve_touch_ui` | `lcd/extui/ftdi_eve_touch_ui/` | 269 | FTDI EVE 触摸 UI（最大） |
+| `ia_creality` | `lcd/extui/ia_creality/` | 5 | Creality DWIN |
+| `malyan` | `lcd/extui/malyan/` | 3 | Malyan |
+| `mks_ui` | `lcd/extui/mks_ui/` | 125 | MKS LVGL TFT（大量 draw_* 界面） |
+| `nextion` | `lcd/extui/nextion/` | 6 | Nextion 串口屏 |
+| `paneldue` | `lcd/extui/paneldue/` | 3 | PanelDue |
+| `sermoon_d1` | `lcd/extui/sermoon_d1/` | 3 | Sermoon D1 |
+| `sermoon_v1` | `lcd/extui/sermoon_v1/` | 3 | Sermoon V1 |
+
+### 2.8 `inc/` — 配置条件系统（16 个文件）
+
+Marlin 的分层预处理器条件系统，负责从 `Configuration*.h` 派生特性标志与类型。
+
+| 文件 | 路径 | 说明 |
+| --- | --- | --- |
+| `MarlinConfig.h` | `inc/MarlinConfig.h` | 总前缀头：汇总所有条件、类型与健全性检查 |
+| `MarlinConfigPre.h` | `inc/MarlinConfigPre.h` | 配置前置汇总 |
+| `MarlinConfigPre-1-axes.h` | `inc/` | 轴相关前置条件 |
+| `MarlinConfigPre-4-adv.h` | `inc/` | 高级配置前置条件 |
+| `MarlinConfigPre-5-post.h` | `inc/` | 后处理前置条件 |
+| `MarlinConfigPre-6-type.h` | `inc/` | 类型前置条件 |
+| `Conditionals-1-axes.h` | `inc/` | 轴派生标志 `HAS_*` |
+| `Conditionals-2-LCD.h` | `inc/` | LCD/UI 派生标志 |
+| `Conditionals-3-etc.h` | `inc/` | 其余派生标志 |
+| `Conditionals-4-adv.h` | `inc/` | 高级特性派生标志 |
+| `Conditionals-5-post.h` | `inc/` | 后处理派生标志 |
+| `Conditionals-6-type.h` | `inc/` | 类型派生定义 |
+| `SanityCheck.h` | `inc/SanityCheck.h` | 编译期配置冲突检查（`#error`） |
+| `Warnings.cpp` | `inc/Warnings.cpp` | 编译期警告输出 |
+| `Changes.h` | `inc/Changes.h` | 配置变更提示 |
+| `Version.h` | `inc/Version.h` | 版本派生/默认值 |
+
+### 2.9 `pins/` — 引脚定义（431 个文件）
+
+400+ 引脚配置文件，按 MCU/板卡族分组。`pins.h` 为路由总入口。
+
+| 文件/目录 | 路径 | 说明 |
+| --- | --- | --- |
+| `pins.h` | `pins/pins.h` | 引脚包含路由（按板卡选择具体文件） |
+| `pinsDebug.h` | `pins/pinsDebug.h` | 引脚调试支持 |
+| `pinsDebug_list.h` | `pins/pinsDebug_list.h` | 引脚调试名称列表 |
+| `pins_lcd.h` | `pins/pins_lcd.h` | LCD 相关引脚辅助 |
+| `pins_postprocess.h` | `pins/pins_postprocess.h` | 引脚后处理（默认值/校验） |
+| `sensitive_pins.h` | `pins/sensitive_pins.h` | 敏感引脚（禁止随意改动） |
+| `ramps/` | `pins/ramps/` | RAMPS 家族（71 个） |
+| `rambo/` | `pins/rambo/` | RAMBo 家族（7 个） |
+| `mega/` | `pins/mega/` | Mega 家族（37 个） |
+| `sanguino/` | `pins/sanguino/` | Sanguino 家族（25 个） |
+| `stm32f1/` | `pins/stm32f1/` | STM32F1 板卡（73 个） |
+| `stm32f4/` | `pins/stm32f4/` | STM32F4 板卡（73 个） |
+| `stm32f7/` | `pins/stm32f7/` | STM32F7（2 个） |
+| `stm32g0/` | `pins/stm32g0/` | STM32G0（10 个） |
+| `stm32h7/` | `pins/stm32h7/` | STM32H7（19 个） |
+| `stm32f0/` | `pins/stm32f0/` | STM32F0（5 个） |
+| `esp32/` | `pins/esp32/` | ESP32 板卡（17 个） |
+| `sam/` | `pins/sam/` | SAM（Due）板卡（19 个） |
+| `samd/` | `pins/samd/` | SAMD 板卡（4 个） |
+| `lpc1768/` | `pins/lpc1768/` | LPC1768（14 个） |
+| `lpc1769/` | `pins/lpc1769/` | LPC1769（14 个） |
+| `rp2040/` | `pins/rp2040/` | RP2040（4 个） |
+| `gd32f1/` | `pins/gd32f1/` | GD32F1（5 个） |
+| `gd32f3/` | `pins/gd32f3/` | GD32F3（2 个） |
+| `hc32f4/` | `pins/hc32f4/` | HC32F4（7 个） |
+| `teensy2/` | `pins/teensy2/` | Teensy 2.x（9 个） |
+| `teensy3/` | `pins/teensy3/` | Teensy 3.x（2 个） |
+| `teensy4/` | `pins/teensy4/` | Teensy 4.x（5 个） |
+| `native/` | `pins/native/` | 模拟器引脚（1 个） |
+
+### 2.10 `HAL/` — 硬件抽象层（637 个文件）
+
+统一接口 `HAL/HAL.h`，按 `HAL/platforms.h` 的宏选择平台实现。
+
+| 文件/目录 | 路径 | 说明 |
+| --- | --- | --- |
+| `HAL.h` | `HAL/HAL.h` | HAL 统一接口声明 |
+| `platforms.h` | `HAL/platforms.h` | 编译期平台选择（`HAL_PATH` 宏） |
+| `shared/` | `HAL/shared/` | 跨平台共享：`HAL.cpp`、`Delay`、SPI、ST7920、EEPROM API、Servo、backtrace、cpu_exception、esp_wifi、fauxpins 等 |
+| `AVR/` | `HAL/AVR/` | 8 位 AVR（ATmega2560/1280/AT90USB 等，34 个文件） |
+| `DUE/` | `HAL/DUE/` | Arduino Due / SAM3X（80 个，含 USB 库） |
+| `STM32/` | `HAL/STM32/` | 通用 STM32（F4/F7/H7/G0 等，61 个；含 `eeprom/`、`tft/`、`sd/`、`u8g/`、`usb_host/`、`dogm/`） |
+| `STM32F1/` | `HAL/STM32F1/` | STM32F1 / Maple 兼容层（48 个） |
+| `ESP32/` | `HAL/ESP32/` | ESP32 / ESP32-S 系列（42 个，含 WiFi、I2S） |
+| `RP2040/` | `HAL/RP2040/` | RP2040 / Pico（33 个） |
+| `SAMD21/` | `HAL/SAMD21/` | SAMD21（30 个） |
+| `SAMD51/` | `HAL/SAMD51/` | SAMD51（27 个） |
+| `LPC1768/` | `HAL/LPC1768/` | LPC1768（47 个） |
+| `GD32_MFL/` | `HAL/GD32_MFL/` | GD32 Maple 兼容（32 个） |
+| `HC32/` | `HAL/HC32/` | HC32F4（37 个） |
+| `TEENSY31_32/` | `HAL/TEENSY31_32/` | Teensy 3.1/3.2（20 个） |
+| `TEENSY35_36/` | `HAL/TEENSY35_36/` | Teensy 3.5/3.6（20 个） |
+| `TEENSY40_41/` | `HAL/TEENSY40_41/` | Teensy 4.0/4.1（21 个） |
+| `LINUX/` | `HAL/LINUX/` | Linux 原生模拟器（35 个） |
+| `NATIVE_SIM/` | `HAL/NATIVE_SIM/` | Native 单元测试模拟器（28 个） |
+
+### 2.11 `Marlin/src/tests/` — 源码内测试入口
+
+| 文件 | 路径 | 说明 |
+| --- | --- | --- |
+| `marlin_tests.cpp/.h` | `Marlin/src/tests/` | 单元测试框架的接线与调度（配合 `Marlin/tests/` 用例） |
+
+---
+
+## 3. `buildroot/` — 构建基础设施
+
+| 目录 | 路径 | 说明 |
+| --- | --- | --- |
+| `bin/` | `buildroot/bin/` | 开发者命令行工具（Python） |
+| `etc/udev/` | `buildroot/etc/udev/` | Linux udev 规则 |
+| `share/` | `buildroot/share/` | 平台定义、脚本、字体、编辑器/IDE 集成 |
+| `test-gcode/` | `buildroot/test-gcode/` | G-code 测试文件（如 `M808-loops.gcode`） |
+| `tests/` | `buildroot/tests/` | 各板卡/环境的 CI 构建测试配置（100+ 目录） |
+| `web-ui/` | `buildroot/web-ui/` | Web UI 资源 |
+
+### 3.1 `buildroot/bin/` — 开发工具脚本
+
+| 脚本 | 说明 |
+| --- | --- |
+| `mftest` | 单环境构建测试入口（AGENTS 推荐） |
+| `mfenvs` | 列出可用 PlatformIO 环境 |
+| `mfutil` | 通用工具入口 |
+| `build_example` / `build_all_examples` | 构建示例配置 |
+| `build_archive` | 打包发布归档 |
+| `config.py` | 配置读写辅助 |
+| `opt_enable` / `opt_disable` / `opt_set` / `opt_find` / `opt_add` | 按名称开关/设置配置项 |
+| `use_example_configs` / `restore_configs` | 示例配置切换/恢复 |
+| `format_code` / `uncrust` | 代码格式化（uncrustify） |
+| `generate_version` | 生成版本信息 |
+| `ci_src_filter` | CI 源过滤计算 |
+| `run_tests` | 运行测试集 |
+| `parallel_build.py` / `parallel-build_and_log.py` | 并行构建 |
+| `parallel-fix_host_*_configs.py` | 批量修正 HOST 配置 |
+| `mac_gcc` | macOS GCC 包装 |
+
+### 3.2 `buildroot/share/` — 共享构建资源
+
+| 子目录 | 路径 | 说明 |
+| --- | --- | --- |
+| `PlatformIO/boards/` | `buildroot/share/PlatformIO/boards/` | 42 个 PlatformIO 板卡定义 JSON |
+| `PlatformIO/scripts/` | `buildroot/share/PlatformIO/scripts/` | 40+ 构建脚本（配置生成、变体、LD 脚本、下载资源、预检等） |
+| `PlatformIO/ldscripts/` | `.../ldscripts/` | 链接脚本 |
+| `PlatformIO/variants/` | `.../variants/` | 板卡变体定义 |
+| `PlatformIO/debugging/` | `.../debugging/` | 调试配置 |
+| `cmake/` | `buildroot/share/cmake/` | CMake 构建支持 |
+| `dwin/` | `buildroot/share/dwin/` | DWIN 屏资源 |
+| `fonts/` | `buildroot/share/fonts/` | 字体资源（bdf/otf/ttf） |
+| `git/` | `buildroot/share/git/` | Git 辅助脚本 |
+| `hosts/` | `buildroot/share/hosts/` | 上位机/主机集成 |
+| `make/` | `buildroot/share/make/` | Makefile 片段 |
+| `pin_interrupt_test/` | `buildroot/share/pin_interrupt_test/` | 引脚中断测试固件 |
+| `pixmaps/` | `buildroot/share/pixmaps/` | 图标/Logo |
+| `scripts/` | `buildroot/share/scripts/` | 其他辅助脚本 |
+| `sublime/` | `buildroot/share/sublime/` | Sublime Text 集成 |
+| `uncrustify/` | `buildroot/share/uncrustify/` | 代码风格配置 |
+| `vscode/` | `buildroot/share/vscode/` | VS Code 集成 |
+| `skills/` | `buildroot/skills/` | 面向贡献者/工具的可复用流程（构建、代码风格、HAL、单元测试、PR 等） |
+
+### 3.3 `buildroot/tests/` — CI 构建测试
+
+按板卡/环境组织的构建测试配置，约 100+ 个目录（如 `mega2560`、`STM32F103RC_btt`、`BTT_SKR_PRO`、`esp32_idf4`、`teensy41`、`linux_native`、`rambo` 等），外加 `schema-test.py`。
+
+---
+
+## 4. `ini/` — PlatformIO 平台配置
+
+| 文件 | 说明 |
+| --- | --- |
+| `avr.ini` | AVR 平台 |
+| `due.ini` | Arduino Due（SAM） |
+| `esp32.ini` | ESP32 |
+| `gd32.ini` | GD32 |
+| `hc32.ini` | HC32 |
+| `lpc176x.ini` | LPC1768/1769 |
+| `native.ini` | Native 模拟器 |
+| `raspberrypi.ini` | Raspberry Pi / RP2040 |
+| `samd21.ini` / `samd51.ini` | SAMD21 / SAMD51 |
+| `stm32-common.ini` | STM32 公共配置 |
+| `stm32f0.ini` / `stm32f1.ini` / `stm32f1-maple.ini` / `stm32f4.ini` / `stm32f7.ini` / `stm32g0.ini` / `stm32h7.ini` | 各 STM32 子家族 |
+| `teensy.ini` | Teensy 3.x/4.x |
+| `features.ini` | 特性相关构建定义 |
+| `renamed.ini` | 环境重命名映射 |
+
+---
+
+## 5. `config/` — 配置仓库指引
+
+| 文件 | 路径 | 说明 |
+| --- | --- | --- |
+| `README.md` | `config/README.md` | 说明具体机型配置已迁移至独立仓库 `MarlinFirmware/Configurations` |
+
+---
+
+## 6. `docs/` — 开发文档
+
+| 文件 | 路径 | 说明 |
+| --- | --- | --- |
+| `BinaryFileTransferProtocol.md` | `docs/` | 二进制文件传输协议 |
+| `Bresenham.md` | `docs/` | Bresenham 步进算法说明 |
+| `ConfigEmbedding.md` | `docs/` | 配置嵌入机制 |
+| `Cutter.md` | `docs/` | 刀具模式 |
+| `Maintenance.md` | `docs/` | 维护者流程 |
+| `Queue.md` | `docs/` | G-code 队列设计 |
+| `Serial.md` | `docs/` | 串口实现说明 |
+
+---
+
+## 7. `docker/` 与 `.devcontainer/`
+
+| 文件 | 路径 | 说明 |
+| --- | --- | --- |
+| `Dockerfile` | `docker/Dockerfile` | 可复现构建环境（python:3.11-bookworm + platformio） |
+| `Dockerfile` | `.devcontainer/Dockerfile` | Dev Container 镜像 |
+| `devcontainer.json` | `.devcontainer/devcontainer.json` | VS Code Dev Container 配置 |
+
+---
+
+## 8. `test/` — 根级测试配置
+
+| 文件 | 路径 | 说明 |
+| --- | --- | --- |
+| `001-default.ini` | `test/` | 默认构建测试配置 |
+| `002-extruders_1_runout.ini` | `test/` | 单挤出机 + 断料检测 |
+| `003-extruders_3_runout.ini` | `test/` | 三挤出机 + 断料检测 |
+| `004-pins_debugging.ini` | `test/` | 引脚调试 |
+| `unit_tests.cpp/.h` | `test/` | 根级单元测试入口 |
+| `README.md` | `test/` | 测试说明 |
+
+---
+
+## 9. `.github/` — CI 与社区
+
+| 文件/目录 | 路径 | 说明 |
+| --- | --- | --- |
+| `workflows/ci-build-tests.yml` | `.github/workflows/` | 全板卡矩阵构建测试 |
+| `workflows/ci-unit-tests.yml` | `.github/workflows/` | Native 模拟器单元测试 |
+| `workflows/ci-validate-boards.yml` | `.github/workflows/` | 板卡定义校验 |
+| `workflows/ci-validate-pins.yml` | `.github/workflows/` | 引脚定义校验 |
+| `workflows/ci-validate-lines.yml` | `.github/workflows/` | 8 位板行数限制校验 |
+| `workflows/ci-validate-conditionals.yml` | `.github/workflows/` | 条件系统校验 |
+| `workflows/check-pr.yml` | `.github/workflows/` | PR 质量检查 |
+| `workflows/bump-date.yml` | `.github/workflows/` | 自动更新日期字符串 |
+| `workflows/clean-closed.yml` / `close-stale.yml` / `lock-closed.yml` / `unlock-reopened.yml` | `.github/workflows/` | Issue/PR 生命周期管理 |
+| `ISSUE_TEMPLATE/` | `.github/ISSUE_TEMPLATE/` | Bug/功能请求模板与配置 |
+| `contributing.md` | `.github/` | 贡献指南 |
+| `pull_request_template.md` | `.github/` | PR 模板 |
+| `code_of_conduct.md` | `.github/` | 行为准则 |
+| `dependabot.yml` | `.github/` | 依赖自动更新 |
+| `FUNDING.yml` | `.github/` | 赞助信息 |
+
+---
+
+## 10. 代码统计汇总
+
+| 指标 | 数值 |
+| --- | --- |
+| 仓库文件总数 | 3,785 |
+| 仓库目录总数 | 500 |
+| C/C++ 源文件行数（`Marlin/src/`） | ≈ 619,947 行 |
+| 头文件（`.h`） | 1,694 |
+| C++ 源文件（`.cpp`） | 1,122 |
+| C 源文件（`.c`） | 67 |
+| PlatformIO 配置（`.ini`） | 223 |
+| Python 脚本（`.py`） | 80 |
+| 引脚板卡定义（`pins/pins_*.h`） | 410 |
+| PlatformIO 板卡定义（JSON） | 42 |
+| HAL 平台实现 | 17 |
+| G-code 命令源文件 | 195 |
+| 热敏电阻温度表 | 53 |
+| 支持语言 | 37 |
+| 根目录单文件特性 | 42 |
+| ExtUI 显示后端 | 19 |
+| CI 构建测试环境 | 100+ |
+| 许可证 | GNU GPL v3.0 |
+| 主要构建系统 | PlatformIO（Arduino 框架）/ Makefile / CMake |
+
+---
+
+## 附录 A：架构分层与依赖方向
+
+```
+应用/特性层        feature/  lcd/  sd/  gcode/feature/
+                        │        │     │
+命令分发层        gcode/ (GcodeSuite / Parser / Queue)
+                        │
+核心模块层        module/ (motion / planner / stepper / temperature / endstops / settings)
+                        │
+工具与库层        core/  libs/  inc/
+                        │
+硬件抽象层        HAL/  (AVR / STM32 / ESP32 / RP2040 / …)
+                        │
+引脚与板卡        pins/  →  buildroot/share/PlatformIO/boards/
+```
+
+依赖方向自上而下：高层策略依赖低层机制，HAL 与 pins 为最底层硬件细节；`inc/` 的条件系统贯穿所有层，按 `Configuration*.h` 裁剪编译单元。
+
+## 附录 B：G-code 处理流程
+
+```
+串口 / SD / PROGMEM
+        │
+        ▼
+GCodeQueue（环形缓冲，BUFSIZE 条）
+        │  advance()
+        ▼
+GCodeParser（字母/编号/子码 + 参数，可选 FASTER_GCODE_PARSER 预扫描）
+        │
+        ▼
+GcodeSuite::process_commands()（按类别路由）
+        │
+        ├─ motion/  → Motion → Planner → Stepper → 硬件脉冲
+        ├─ temp/    → thermalManager → 加热器/传感器
+        ├─ calibrate/ → Motion / Probe / Endstops
+        └─ sd/ lcd/ config/ …
+```
+
+## 附录 C：阅读建议
+
+1. **入口**：先读 `Marlin/src/MarlinCore.cpp` 的 `setup()` 与 `loop()`，理解模块初始化顺序。
+2. **配置**：读 `Marlin/Configuration.h` 与 `inc/Conditionals-*.h`，理解特性如何被启用。
+3. **数据流**：沿 `gcode/queue.cpp` → `gcode/parser.cpp` → `gcode/gcode.cpp` 跟踪一条 G-code。
+4. **运动**：`module/motion.cpp` → `module/planner.cpp` → `module/stepper.cpp`。
+5. **温度**：`module/temperature.cpp` 与 `module/thermistor/`。
+6. **移植**：从 `HAL/platforms.h` 选择平台，对照对应 `HAL/<PLATFORM>/AGENTS.md`。
